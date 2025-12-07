@@ -59,6 +59,7 @@ Upload any food image and receive instant insights — no manual logging require
 ## 📸 Demo Preview  
 <img width="1512" height="862" alt="Screenshot 2025-12-07 at 12 17 02 PM" src="https://github.com/user-attachments/assets/9bdfe72e-2f07-4a92-b203-5991175bb829" />
 <img width="1507" height="739" alt="Screenshot 2025-12-07 at 1 13 38 PM" src="https://github.com/user-attachments/assets/e3685a8b-2749-4cbe-801e-768341fc0bc2" />
+<img width="1507" height="739" alt="Screenshot 2025-12-07 at 1 14 32 PM" src="https://github.com/user-attachments/assets/ba26fc1b-2391-47ac-be59-b86127bbd872" />
 <img width="1512" height="862" alt="Screenshot 2025-12-07 at 12 18 08 PM" src="https://github.com/user-attachments/assets/f9aa78bb-cc73-4dc4-b7d6-98fdaa4b7dcb" />
 
 
