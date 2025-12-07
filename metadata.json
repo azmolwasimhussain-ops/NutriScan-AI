@@ -1,0 +1,7 @@
+{
+  "name": "IndianCuisine NutriScan AI",
+  "description": "A professional AI nutritionist specializing in Indian cuisine analysis from images and descriptions.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
