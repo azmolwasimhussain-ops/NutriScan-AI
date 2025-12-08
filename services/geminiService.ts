@@ -1,6 +1,47 @@
 import { GoogleGenAI, Type, Schema, Modality } from "@google/genai";
 import { FoodAnalysisResult } from "../types";
 
+// --- Configuration & Schemas ---
+
+const CACHE_TTL = 1000 * 60 * 60; // 1 Hour
+const analysisCache = new Map<string, { data: FoodAnalysisResult, timestamp: number }>();
+
+const COMMON_DISHES_LOOKUP: Record<string, FoodAnalysisResult> = {
+  "butter chicken": {
+    dishName: "Butter Chicken",
+    portionSize: "1 Bowl (300g)",
+    nutrition: { calories: 490, protein: 25, carbs: 18, fats: 35, fiber: 2, sodium: 850 },
+    ingredients: ["Chicken", "Butter", "Cream", "Tomato", "Spices", "Fenugreek"],
+    healthRating: 6,
+    healthRatingReason: "Rich in protein but high in saturated fats and calories due to cream and butter.",
+    dietaryInfo: { type: 'Non-veg', isGlutenFree: true, isDairyFree: false },
+    allergens: ["Dairy"],
+    healthierAlternative: "Opt for Chicken Tikka (dry) or reduce cream quantity."
+  },
+  "samosa": {
+    dishName: "Samosa",
+    portionSize: "2 Pieces (100g)",
+    nutrition: { calories: 260, protein: 6, carbs: 32, fats: 18, fiber: 2, sodium: 400 },
+    ingredients: ["Potatoes", "Peas", "All Purpose Flour", "Spices", "Oil"],
+    healthRating: 4,
+    healthRatingReason: "Deep fried and high in refined carbs and fats.",
+    dietaryInfo: { type: 'Veg', isGlutenFree: false, isDairyFree: true },
+    allergens: ["Gluten"],
+    healthierAlternative: "Baked Samosa or Air-fried version."
+  },
+  "masala dosa": {
+    dishName: "Masala Dosa",
+    portionSize: "1 Dosa with Sambar",
+    nutrition: { calories: 380, protein: 8, carbs: 65, fats: 10, fiber: 6, sodium: 600 },
+    ingredients: ["Rice", "Urad Dal", "Potatoes", "Onions", "Spices"],
+    healthRating: 7,
+    healthRatingReason: "Fermented batter is good for gut health, but potato filling adds carbs.",
+    dietaryInfo: { type: 'Veg', isGlutenFree: true, isDairyFree: true },
+    allergens: [],
+    healthierAlternative: "Reduce potato filling or use Paneer/Vegetable filling."
+  }
+};
+
 const RESPONSE_SCHEMA: Schema = {
   type: Type.OBJECT,
   properties: {
@@ -44,40 +85,121 @@ const RESPONSE_SCHEMA: Schema = {
   required: ["dishName", "portionSize", "nutrition", "ingredients", "healthRating", "healthRatingReason", "dietaryInfo", "allergens", "healthierAlternative"]
 };
 
+// --- Helper Functions ---
+
+const compressImage = async (base64Str: string, maxWidth = 800, quality = 0.7): Promise<string> => {
+  if (typeof window === 'undefined') return base64Str; // Server-side safety
+  
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = base64Str.startsWith('data:') ? base64Str : `data:image/jpeg;base64,${base64Str}`;
+    
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+
+      // Maintain aspect ratio
+      if (width > maxWidth) {
+        height = Math.round((height * maxWidth) / width);
+        width = maxWidth;
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          // Get the data URL without the prefix to be cleaner if needed, but Gemini usually expects base64 data only if using inlineData structure differently. 
+          // However, the SDK inlineData expects just the base64 string without the prefix usually, or handles it.
+          // Let's return the full dataUrl and strip it later.
+          resolve(canvas.toDataURL('image/jpeg', quality));
+      } else {
+          resolve(base64Str);
+      }
+    };
+    img.onerror = () => resolve(base64Str);
+  });
+};
+
+const getCacheKey = (text?: string, image?: string) => {
+    if (image) {
+        // Simple hash for image: use first 100 chars + last 100 chars + length
+        const cleanImg = image.replace(/^data:image\/\w+;base64,/, "");
+        return `IMG_${cleanImg.substring(0, 50)}_${cleanImg.slice(-50)}_${cleanImg.length}`;
+    }
+    return `TXT_${text?.trim().toLowerCase()}`;
+};
+
 // --- Main Analysis ---
+
 export const analyzeFoodWithGemini = async (
   textDescription?: string,
   imageBase64?: string,
   mimeType?: string
 ): Promise<FoodAnalysisResult> => {
+  
+  // 1. Instant Cache/Lookup Check
+  const cacheKey = getCacheKey(textDescription, imageBase64);
+  const cached = analysisCache.get(cacheKey);
+  if (cached && (Date.now() - cached.timestamp < CACHE_TTL)) {
+    console.log("Serving from cache");
+    return cached.data;
+  }
+
+  // 1b. Static Common Dishes Lookup (Text Mode Only)
+  if (textDescription && !imageBase64) {
+      const cleanText = textDescription.trim().toLowerCase();
+      for (const [key, data] of Object.entries(COMMON_DISHES_LOOKUP)) {
+          if (cleanText.includes(key)) {
+               return data;
+          }
+      }
+  }
+
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // Requirement: Use 'gemini-3-pro-preview' for image understanding (Analyze Images)
-  // Requirement: Use 'gemini-2.5-flash-lite' for text-only (Fast AI responses)
-  const modelName = imageBase64 ? 'gemini-3-pro-preview' : 'gemini-2.5-flash-lite';
+  // OPTIMIZATION: Use 'gemini-2.5-flash' for BOTH image and text for maximum speed.
+  // It is significantly faster than Pro and sufficient for food recognition.
+  const modelName = 'gemini-2.5-flash';
 
   const systemInstruction = `
-    You are a professional nutritionist and food analyst specializing in Indian cuisine.
-    Your task is to analyze the given food description or image accurately.
-    Identify the dish, estimate portion size, calculate specific nutrition facts, check ingredients, rate health (1-10), and determine dietary type.
-    Be extremely accurate with Indian dishes.
+    Analyze this Indian food. Return JSON: dishName, portionSize, nutrition(calories, protein, carbs, fats, fiber, sodium), ingredients, healthRating(1-10), reason, dietaryInfo, allergens, healthierAlternative.
+    Be concise.
   `;
 
   const parts: any[] = [];
 
+  // 2. Image Compression & Pre-processing
   if (imageBase64 && mimeType) {
+    let processableImage = imageBase64;
+    
+    // Compress only if it looks like a raw large image (length heuristic)
+    if (imageBase64.length > 500000) { // ~350KB
+        try {
+            const compressedDataUrl = await compressImage(imageBase64);
+            // Strip mime prefix for the API call if needed, but existing code might rely on it.
+            // The existing code passes `data` as pure base64.
+            const matches = compressedDataUrl.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+            if (matches && matches.length === 3) {
+                 processableImage = matches[2];
+            }
+        } catch (e) {
+            console.warn("Compression failed, using original", e);
+        }
+    }
+
     parts.push({
       inlineData: {
-        data: imageBase64,
+        data: processableImage,
         mimeType: mimeType,
       },
     });
-  }
-
-  if (textDescription) {
+    
+    // Optimize prompt for image
+    parts.push({ text: "Identify this dish and provide nutrition data." });
+  } else if (textDescription) {
     parts.push({ text: textDescription });
-  } else if (imageBase64) {
-    parts.push({ text: "Analyze this food image in detail according to the system instructions." });
   }
 
   try {
@@ -88,11 +210,17 @@ export const analyzeFoodWithGemini = async (
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",
         responseSchema: RESPONSE_SCHEMA,
+        temperature: 0.3, // Low temperature for consistent, faster deterministic outputs
       }
     });
 
     if (response.text) {
-      return JSON.parse(response.text) as FoodAnalysisResult;
+      const result = JSON.parse(response.text) as FoodAnalysisResult;
+      
+      // Cache the result
+      analysisCache.set(cacheKey, { data: result, timestamp: Date.now() });
+      
+      return result;
     } else {
       throw new Error("No data returned from Gemini");
     }
@@ -132,7 +260,7 @@ export const generateSpeech = async (text: string): Promise<AudioBuffer> => {
   return audioBuffer;
 };
 
-// --- Image Editing (Nano Banana / Gemini 2.5 Flash Image) ---
+// --- Image Editing (Gemini 2.5 Flash Image) ---
 export const editFoodImage = async (
   originalImageBase64: string,
   mimeType: string,
@@ -171,12 +299,10 @@ export const generateFoodVideo = async (
   imageBase64: string,
   mimeType: string
 ): Promise<string> => {
-  // Always create new instance for Veo to ensure API key is fresh from selection
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   let operation = await ai.models.generateVideos({
     model: 'veo-3.1-fast-generate-preview',
-    // Prompt is optional but helpful
     prompt: 'Cinematic slow motion shot of this delicious Indian dish, professional food photography, 4k',
     image: {
       imageBytes: imageBase64,
@@ -189,16 +315,14 @@ export const generateFoodVideo = async (
     }
   });
 
-  // Polling loop
   while (!operation.done) {
-    await new Promise(resolve => setTimeout(resolve, 5000)); // Check every 5s
+    await new Promise(resolve => setTimeout(resolve, 5000));
     operation = await ai.operations.getVideosOperation({operation: operation});
   }
 
   const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
   if (!downloadLink) throw new Error("Video generation failed");
 
-  // Fetch the actual video bytes using the key
   const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
   const blob = await response.blob();
   return URL.createObjectURL(blob);

@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Camera, Type, Upload, X, Loader2, ChefHat, ImagePlus, History, Search, Sparkles } from 'lucide-react';
+import { Camera, Type, Upload, X, Loader2, ChefHat, ImagePlus, History, Search, Sparkles, Image as ImageIcon } from 'lucide-react';
 import { FoodAnalysisResult, InputMode } from './types';
 import { analyzeFoodWithGemini } from './services/geminiService';
 import AnalysisResult from './components/AnalysisResult';
@@ -9,6 +9,7 @@ import FeaturesSection from './components/FeaturesSection';
 import SamplePreview from './components/SamplePreview';
 import Footer from './components/Footer';
 import Navbar from './components/Navbar';
+import CameraCapture from './components/CameraCapture';
 
 // Abstract Spice SVG Components for Background
 const SpiceLeaf = ({ className, style }: { className?: string, style?: React.CSSProperties }) => (
@@ -42,6 +43,7 @@ const App: React.FC = () => {
   const [result, setResult] = useState<FoodAnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -66,6 +68,17 @@ const App: React.FC = () => {
       reader.readAsDataURL(file);
       setError(null);
       setResult(null);
+    }
+  };
+
+  const handleCameraCapture = (imageSrc: string) => {
+    const matches = imageSrc.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+    if (matches && matches.length === 3) {
+        setMimeType(matches[1]);
+        setSelectedImage(matches[2]);
+        setIsCameraOpen(false);
+        setError(null);
+        setResult(null);
     }
   };
 
@@ -125,6 +138,13 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen font-sans text-slate-900 relative selection:bg-orange-100 selection:text-orange-900 overflow-x-hidden flex flex-col">
       <Navbar />
+      
+      {isCameraOpen && (
+        <CameraCapture 
+            onCapture={handleCameraCapture} 
+            onClose={() => setIsCameraOpen(false)} 
+        />
+      )}
 
       {/* Background Decor Elements */}
       <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
@@ -197,12 +217,11 @@ const App: React.FC = () => {
                     {mode === InputMode.UPLOAD ? (
                       <div className="space-y-8 animate-fade-in-up">
                         <div 
-                          className={`relative border-[3px] border-dashed rounded-[2rem] h-72 md:h-96 flex flex-col items-center justify-center cursor-pointer transition-all duration-300 group ${
+                          className={`relative border-[3px] border-dashed rounded-[2rem] h-80 md:h-96 flex flex-col items-center justify-center transition-all duration-300 group ${
                             selectedImage 
                               ? 'border-orange-300 bg-orange-50/20' 
-                              : 'border-slate-200 hover:border-orange-400 hover:bg-orange-50/30'
+                              : 'border-slate-200 hover:border-orange-200'
                           }`}
-                          onClick={() => fileInputRef.current?.click()}
                         >
                           <input 
                             type="file" 
@@ -214,7 +233,7 @@ const App: React.FC = () => {
                           
                           {selectedImage ? (
                             <div className="relative w-full h-full p-4 animate-pop-in">
-                              <div className="w-full h-full relative rounded-3xl overflow-hidden shadow-lg group-hover:shadow-xl transition-shadow bg-white">
+                              <div className="w-full h-full relative rounded-3xl overflow-hidden shadow-lg transition-shadow bg-white">
                                   <img 
                                   src={getPreviewSrc() || ''} 
                                   alt="Preview" 
@@ -229,15 +248,31 @@ const App: React.FC = () => {
                               </button>
                             </div>
                           ) : (
-                            <div className="text-center p-6 space-y-6">
-                              <div className="w-24 h-24 bg-gradient-to-tr from-orange-100 to-amber-50 text-orange-500 rounded-[2rem] flex items-center justify-center mx-auto shadow-[0_20px_40px_-15px_rgba(249,115,22,0.3)] ring-8 ring-white transition-transform duration-500 group-hover:scale-110 group-hover:-rotate-3">
+                            <div className="text-center p-4 w-full max-w-md mx-auto">
+                              <div className="w-24 h-24 bg-gradient-to-tr from-orange-100 to-amber-50 text-orange-500 rounded-[2rem] flex items-center justify-center mx-auto shadow-[0_20px_40px_-15px_rgba(249,115,22,0.3)] ring-8 ring-white mb-8 group-hover:scale-110 group-hover:-rotate-3 transition-transform duration-500">
                                 <ImagePlus className="w-10 h-10 md:w-12 md:h-12 drop-shadow-sm" />
                               </div>
-                              <div>
-                                  <p className="text-slate-900 font-bold text-xl md:text-2xl tracking-tight group-hover:text-orange-600 transition-colors">
-                                      Drop your food photo here
-                                  </p>
-                                  <p className="text-slate-500 text-sm md:text-base mt-2 font-medium">or click to browse gallery</p>
+                              
+                              <p className="text-slate-900 font-bold text-xl mb-8 tracking-tight">
+                                  Drop your food photo here
+                              </p>
+
+                              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full">
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                                    className="w-full sm:w-auto px-6 py-3.5 bg-slate-100 text-slate-700 rounded-2xl font-bold hover:bg-slate-200 transition-colors flex items-center justify-center gap-2 group/btn"
+                                >
+                                    <ImageIcon className="w-5 h-5 text-slate-500 group-hover/btn:text-slate-700" />
+                                    Gallery
+                                </button>
+                                <span className="text-slate-300 font-bold text-sm uppercase">or</span>
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); setIsCameraOpen(true); }}
+                                    className="w-full sm:w-auto px-6 py-3.5 bg-orange-100 text-orange-700 rounded-2xl font-bold hover:bg-orange-200 transition-colors flex items-center justify-center gap-2 group/btn border border-orange-200"
+                                >
+                                    <Camera className="w-5 h-5 text-orange-600" />
+                                    Take Photo
+                                </button>
                               </div>
                             </div>
                           )}
